@@ -6,7 +6,7 @@
 # Picture in Picture program for x11
 - also called a pip
 - logo made by me in gimp
-- demo but on youtube [text](https://youtu.be/DEUjJxVzJyQ)
+- demo but on youtube [video](https://youtu.be/DEUjJxVzJyQ)
 
 ## Video Demo
 <video width="1000" height="300" controls>
