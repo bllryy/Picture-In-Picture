@@ -1,0 +1,12 @@
+[package]
+name = "pip-viewer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+x11rb = { version = "0.13", features = ["cursor", "composite", "shm", "damage", "randr"] }
+winit = "0.30"
+softbuffer = "0.4"
+libc = "0.2"
+ksni = "0.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
