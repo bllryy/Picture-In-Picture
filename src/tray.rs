@@ -92,8 +92,9 @@ impl ksni::Tray for PipTray {
         // Window list
         for window in &self.windows {
             let window_id = window.id;
-            let label = if window.name.len() > 40 {
-                format!("{}... ({})", &window.name[..37], window.class)
+            let label = if window.name.chars().count() > 40 {
+                let truncated: String = window.name.chars().take(37).collect();
+                format!("{}... ({})", truncated, window.class)
             } else {
                 format!("{} ({})", window.name, window.class)
             };
