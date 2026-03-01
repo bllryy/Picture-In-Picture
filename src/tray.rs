@@ -1,4 +1,4 @@
-use ksni::{self, menu::*};
+use ksni::{self, menu::*, Icon, ToolTip};
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use crate::window_list::{self, WindowEntry};
@@ -15,14 +15,14 @@ pub enum TrayAction {
 pub struct PipTray {
     tx: Sender<TrayAction>,
     windows: Vec<WindowEntry>,
-    icon_pixmap: Vec<ksni::IconPixmap>,
+    icon: Vec<Icon>,
 }
 
 impl PipTray {
     pub fn new(tx: Sender<TrayAction>) -> Self {
         let windows = window_list::list_windows().unwrap_or_default();
-        let icon_pixmap = load_icon_pixmap();
-        Self { tx, windows, icon_pixmap }
+        let icon = load_icon();
+        Self { tx, windows, icon }
     }
 
     fn refresh_windows(&mut self) {
@@ -30,7 +30,7 @@ impl PipTray {
     }
 }
 
-fn load_icon_pixmap() -> Vec<ksni::IconPixmap> {
+fn load_icon() -> Vec<Icon> {
     let img = match image::load_from_memory(ICON_DATA) {
         Ok(img) => img.into_rgba8(),
         Err(_) => return Vec::new(),
@@ -39,18 +39,18 @@ fn load_icon_pixmap() -> Vec<ksni::IconPixmap> {
     let width = img.width() as i32;
     let height = img.height() as i32;
 
-    // Convert RGBA to ARGB (big-endian for DBus)
+    // Convert RGBA to ARGB (network byte order for DBus)
     let mut argb_data = Vec::with_capacity((width * height * 4) as usize);
     for pixel in img.pixels() {
         let [r, g, b, a] = pixel.0;
-        // ARGB in big-endian network byte order
+        // ARGB32 in network byte order (big-endian)
         argb_data.push(a);
         argb_data.push(r);
         argb_data.push(g);
         argb_data.push(b);
     }
 
-    vec![ksni::IconPixmap {
+    vec![Icon {
         width,
         height,
         data: argb_data,
@@ -62,20 +62,20 @@ impl ksni::Tray for PipTray {
         "pip-viewer".to_string()
     }
 
-    fn icon_pixmap(&self) -> Vec<ksni::IconPixmap> {
-        self.icon_pixmap.clone()
+    fn icon_pixmap(&self) -> Vec<Icon> {
+        self.icon.clone()
     }
 
     fn title(&self) -> String {
         "PiP Viewer".to_string()
     }
 
-    fn tool_tip(&self) -> ksni::ToolTip {
-        ksni::ToolTip {
+    fn tool_tip(&self) -> ToolTip {
+        ToolTip {
             title: "PiP Viewer".to_string(),
             description: "Click to select a window for picture-in-picture".to_string(),
             icon_name: String::new(),
-            icon_pixmap: self.icon_pixmap.clone(),
+            icon_pixmap: self.icon.clone(),
         }
     }
 
