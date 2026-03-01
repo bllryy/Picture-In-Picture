@@ -9,9 +9,7 @@
 - demo but on youtube [video](https://youtu.be/DEUjJxVzJyQ)
 
 ## Video Demo
-<video width="1000" height="300" controls>
-  <source src="pipvid.mp4" type="video/mp4">
-</video>
+![](pipvid.mp4)
 
 ## TODO
 - make this a real like program that can be installed with a appimage/bin/aur
