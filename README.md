@@ -9,7 +9,10 @@
 - demo but on youtube [video](https://youtu.be/DEUjJxVzJyQ)
 
 ## Video Demo
-<video src="pipvid.mp4" width="1000" height="300" controls></video>
+
+[![Video Demo](https://img.youtube.com/vi/DEUjJxVzJyQ/maxresdefault.jpg)](https://youtu.be/DEUjJxVzJyQ)
+
+*Click the image above to watch the demo on YouTube*
 
 ## TODO
 - make this a real like program that can be installed with a appimage/bin/aur
