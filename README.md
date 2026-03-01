@@ -10,9 +10,9 @@
 
 ## Video Demo
 
-[![Video Demo](https://img.youtube.com/vi/DEUjJxVzJyQ/maxresdefault.jpg)](https://youtu.be/DEUjJxVzJyQ)
-
-*Click the image above to watch the demo on YouTube*
+<video src="https://github.com/bllryyy/picture-in-picture/raw/main/pipvid.mp4" controls="controls" style="max-width: 100%;">
+  Your browser does not support the video tag.
+</video>
 
 ## TODO
 - make this a real like program that can be installed with a appimage/bin/aur
