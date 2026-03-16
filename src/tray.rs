@@ -1,14 +1,16 @@
 use ksni::{self, menu::*, Icon, ToolTip};
 use std::sync::mpsc::{self, Receiver, Sender};
 
+use crate::session::SessionType;
 use crate::window_list::{self, WindowEntry};
 
 const ICON_DATA: &[u8] = include_bytes!("../pictureinpicture.png");
 
 #[derive(Debug, Clone)]
 pub enum TrayAction {
-    SelectWindow(u32), // Window ID
-    ClickToSelect,
+    SelectWindow(u32), // Window ID (X11 only)
+    ClickToSelect,     // Interactive picker (X11 only)
+    PortalSelect,      // Portal window selection (Wayland)
     Quit,
 }
 
@@ -16,17 +18,29 @@ pub struct PipTray {
     tx: Sender<TrayAction>,
     windows: Vec<WindowEntry>,
     icon: Vec<Icon>,
+    session_type: SessionType,
 }
 
 impl PipTray {
-    pub fn new(tx: Sender<TrayAction>) -> Self {
-        let windows = window_list::list_windows().unwrap_or_default();
+    pub fn new(tx: Sender<TrayAction>, session_type: SessionType) -> Self {
+        let windows = if session_type == SessionType::X11 {
+            window_list::list_windows().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let icon = load_icon();
-        Self { tx, windows, icon }
+        Self {
+            tx,
+            windows,
+            icon,
+            session_type,
+        }
     }
 
     fn refresh_windows(&mut self) {
-        self.windows = window_list::list_windows().unwrap_or_default();
+        if self.session_type == SessionType::X11 {
+            self.windows = window_list::list_windows().unwrap_or_default();
+        }
     }
 }
 
@@ -80,6 +94,15 @@ impl ksni::Tray for PipTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
+        match self.session_type {
+            SessionType::X11 => self.x11_menu(),
+            SessionType::Wayland => self.wayland_menu(),
+        }
+    }
+}
+
+impl PipTray {
+    fn x11_menu(&self) -> Vec<MenuItem<Self>> {
         let mut items: Vec<MenuItem<Self>> = Vec::new();
 
         // Header
@@ -143,13 +166,33 @@ impl ksni::Tray for PipTray {
 
         items
     }
+
+    fn wayland_menu(&self) -> Vec<MenuItem<Self>> {
+        vec![
+            MenuItem::Standard(StandardItem {
+                label: "⊕ Select Window...".to_string(),
+                activate: Box::new(|tray: &mut Self| {
+                    let _ = tray.tx.send(TrayAction::PortalSelect);
+                }),
+                ..Default::default()
+            }),
+            MenuItem::Separator,
+            MenuItem::Standard(StandardItem {
+                label: "Quit".to_string(),
+                activate: Box::new(|tray: &mut Self| {
+                    let _ = tray.tx.send(TrayAction::Quit);
+                }),
+                ..Default::default()
+            }),
+        ]
+    }
 }
 
-pub fn run_tray() -> Receiver<TrayAction> {
+pub fn run_tray(session_type: SessionType) -> Receiver<TrayAction> {
     let (tx, rx) = mpsc::channel();
 
     std::thread::spawn(move || {
-        let tray = PipTray::new(tx);
+        let tray = PipTray::new(tx, session_type);
         let service = ksni::TrayService::new(tray);
         let _ = service.run();
     });
