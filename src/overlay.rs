@@ -7,7 +7,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Icon, Window, WindowAttributes, WindowId, WindowLevel};
 
-use crate::capture::WindowCapture;
+use crate::capture_backend::CaptureBackend;
 
 const ICON_DATA: &[u8] = include_bytes!("../pictureinpicture.png");
 
@@ -18,40 +18,35 @@ fn load_window_icon() -> Option<Icon> {
 }
 
 pub struct PipOverlay {
-    target_window_id: u32,
-    initial_width: u32,
-    initial_height: u32,
+    capture: Box<dyn CaptureBackend>,
 }
 
 struct App {
     window: Option<Rc<Window>>,
     surface: Option<Surface<Rc<Window>, Rc<Window>>>,
-    capture: Option<WindowCapture>,
-    target_window_id: u32,
+    capture: Option<Box<dyn CaptureBackend>>,
     source_width: u32,
     source_height: u32,
 }
 
 impl PipOverlay {
-    pub fn new(window_id: u32, width: u32, height: u32) -> Self {
-        Self {
-            target_window_id: window_id,
-            initial_width: width,
-            initial_height: height,
-        }
+    pub fn new(capture: Box<dyn CaptureBackend>) -> Self {
+        Self { capture }
     }
 
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let event_loop = EventLoop::new()?;
         event_loop.set_control_flow(ControlFlow::Poll);
 
+        let source_width = self.capture.width();
+        let source_height = self.capture.height();
+
         let mut app = App {
             window: None,
             surface: None,
-            capture: None,
-            target_window_id: self.target_window_id,
-            source_width: self.initial_width,
-            source_height: self.initial_height,
+            capture: Some(self.capture),
+            source_width,
+            source_height,
         };
 
         event_loop.run_app(&mut app)?;
@@ -98,22 +93,8 @@ impl ApplicationHandler for App {
             );
         }
 
-        // Create capture
-        let capture = match WindowCapture::new(self.target_window_id) {
-            Ok(c) => {
-                self.source_width = c.width();
-                self.source_height = c.height();
-                Some(c)
-            }
-            Err(e) => {
-                eprintln!("Failed to initialize capture: {}", e);
-                None
-            }
-        };
-
         self.window = Some(window);
         self.surface = Some(surface);
-        self.capture = capture;
     }
 
     fn window_event(

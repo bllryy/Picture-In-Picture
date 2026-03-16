@@ -1,3 +1,4 @@
+use crate::capture_backend::CaptureBackend;
 use x11rb::connection::Connection;
 use x11rb::protocol::composite::{ConnectionExt as CompositeExt, Redirect};
 use x11rb::protocol::shm::ConnectionExt as ShmExt;
@@ -137,16 +138,8 @@ impl WindowCapture {
         })
     }
 
-    pub fn width(&self) -> u32 {
-        self.width as u32
-    }
-
-    pub fn height(&self) -> u32 {
-        self.height as u32
-    }
-
     /// Capture current frame into shared memory, returns BGRA pixel data
-    pub fn capture_frame(&mut self) -> Result<&[u8], CaptureError> {
+    fn capture_frame_x11(&mut self) -> Result<&[u8], CaptureError> {
         // Check if window still exists and get current geometry
         let geom = self
             .conn
@@ -250,6 +243,20 @@ impl WindowCapture {
             .map_err(|e| CaptureError::ConnectionFailed(e.to_string()))?;
 
         Ok(())
+    }
+}
+
+impl CaptureBackend for WindowCapture {
+    fn width(&self) -> u32 {
+        self.width as u32
+    }
+
+    fn height(&self) -> u32 {
+        self.height as u32
+    }
+
+    fn capture_frame(&mut self) -> Result<&[u8], Box<dyn std::error::Error>> {
+        Ok(self.capture_frame_x11()?)
     }
 }
 
