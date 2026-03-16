@@ -7,6 +7,7 @@ mod tray;
 mod window_list;
 mod window_picker;
 
+use capture_backend::CaptureBackend;
 use overlay::PipOverlay;
 use session::SessionType;
 use tray::TrayAction;
@@ -68,7 +69,7 @@ fn main() {
 }
 
 fn start_pip_x11(window_id: u32) {
-    let (width, height) = get_window_size(window_id).unwrap_or((800, 600));
+    let (_width, _height) = get_window_size(window_id).unwrap_or((800, 600));
 
     println!("Starting PiP for window 0x{:x}...", window_id);
 

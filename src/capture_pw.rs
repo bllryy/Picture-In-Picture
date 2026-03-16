@@ -84,23 +84,30 @@ impl CaptureBackend for PipeWireCapture {
 /// Returns (pipewire_fd, node_id, width, height).
 async fn start_portal_session() -> Result<(std::os::fd::OwnedFd, u32, u32, u32), Box<dyn std::error::Error>>
 {
-    use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType};
+    use ashpd::desktop::{
+        PersistMode,
+        screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType},
+    };
 
     let proxy = Screencast::new().await?;
-    let session = proxy.create_session().await?;
+    let session = proxy.create_session(Default::default()).await?;
 
     proxy
         .select_sources(
             &session,
-            CursorMode::Embedded,
-            SourceType::Window,
-            false, // multiple
-            None,  // restore_token
-            None,  // persist_mode
+            SelectSourcesOptions::default()
+                .set_cursor_mode(CursorMode::Embedded)
+                .set_sources(SourceType::Window | SourceType::Window)
+                .set_multiple(false)
+                .set_persist_mode(PersistMode::DoNot),
         )
         .await?;
 
-    let response = proxy.start(&session, None).await?;
+    let response = proxy
+        .start(&session, None, Default::default())
+        .await?
+        .response()?;
+
     let streams = response.streams();
 
     if streams.is_empty() {
@@ -111,9 +118,15 @@ async fn start_portal_session() -> Result<(std::os::fd::OwnedFd, u32, u32, u32),
     let node_id = stream.pipe_wire_node_id();
     let (width, height) = stream.size().unwrap_or((800, 600));
 
-    let fd = proxy.open_pipe_wire_remote(&session).await?;
+    let fd = proxy
+        .open_pipe_wire_remote(&session, Default::default())
+        .await?;
 
     Ok((fd, node_id, width as u32, height as u32))
+}
+
+struct UserData {
+    format: pipewire::spa::param::video::VideoInfoRaw,
 }
 
 /// Run the PipeWire main loop, receiving frames and writing them to shared memory.
@@ -124,15 +137,14 @@ fn run_pipewire_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use pipewire as pw;
     use pw::spa;
-    use std::os::fd::AsRawFd;
 
     pw::init();
 
-    let mainloop = pw::main_loop::MainLoop::new(None)?;
-    let context = pw::context::Context::new(&mainloop)?;
-    let core = context.connect_fd(fd.as_raw_fd(), None)?;
+    let mainloop = pw::main_loop::MainLoopBox::new(None)?;
+    let context = pw::context::ContextBox::new(mainloop.loop_(), None)?;
+    let core = context.connect_fd(fd, None)?;
 
-    let stream = pw::stream::Stream::new(
+    let stream = pw::stream::StreamBox::new(
         &core,
         "pip-viewer-capture",
         pw::properties::properties! {
@@ -142,29 +154,44 @@ fn run_pipewire_loop(
         },
     )?;
 
+    let data = UserData {
+        format: Default::default(),
+    };
+
     let shared_for_cb = Arc::clone(&shared);
 
     let _listener = stream
-        .add_local_listener_with_user_data(())
-        .param_changed(move |_, _user_data, id, pod| {
+        .add_local_listener_with_user_data(data)
+        .param_changed(move |_, user_data, id, param| {
+            let Some(param) = param else { return };
             if id != spa::param::ParamType::Format.as_raw() {
                 return;
             }
-            if let Some(pod) = pod {
-                // Try to parse the video format to update dimensions
-                if let Ok(value) = spa::pod::deserialize::PodDeserializer::deserialize_from::<
-                    spa::param::video::VideoInfoRaw,
-                >(pod.as_bytes())
-                {
-                    let w = value.size().width;
-                    let h = value.size().height;
-                    if w > 0 && h > 0 {
-                        if let Ok(mut frame) = shared_for_cb.lock() {
-                            frame.width = w as u32;
-                            frame.height = h as u32;
-                            frame.data.resize((w * h * 4) as usize, 0);
-                        }
-                    }
+
+            let (media_type, media_subtype) =
+                match spa::param::format_utils::parse_format(param) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
+
+            if media_type != spa::param::format::MediaType::Video
+                || media_subtype != spa::param::format::MediaSubtype::Raw
+            {
+                return;
+            }
+
+            user_data
+                .format
+                .parse(param)
+                .expect("Failed to parse VideoInfoRaw");
+
+            let w = user_data.format.size().width;
+            let h = user_data.format.size().height;
+            if w > 0 && h > 0 {
+                if let Ok(mut frame) = shared_for_cb.lock() {
+                    frame.width = w;
+                    frame.height = h;
+                    frame.data.resize((w * h * 4) as usize, 0);
                 }
             }
         })
@@ -174,11 +201,11 @@ fn run_pipewire_loop(
                 if datas.is_empty() {
                     return;
                 }
-                let data = &datas[0];
+                let data = &mut datas[0];
                 if let Some(slice) = data.data() {
                     if let Ok(mut frame) = shared.lock() {
                         let expected = (frame.width * frame.height * 4) as usize;
-                        if slice.len() >= expected {
+                        if slice.len() >= expected && expected > 0 {
                             frame.data[..expected].copy_from_slice(&slice[..expected]);
                         }
                     }
@@ -187,65 +214,68 @@ fn run_pipewire_loop(
         })
         .register()?;
 
-    // Build format parameters for the stream
-    let format_params = build_video_params();
+    // Build format parameters for the stream using the spa object! macro
+    let obj = pw::spa::pod::object!(
+        pw::spa::utils::SpaTypes::ObjectParamFormat,
+        pw::spa::param::ParamType::EnumFormat,
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaType,
+            Id,
+            pw::spa::param::format::MediaType::Video
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::MediaSubtype,
+            Id,
+            pw::spa::param::format::MediaSubtype::Raw
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFormat,
+            Choice,
+            Enum,
+            Id,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::BGRx,
+            pw::spa::param::video::VideoFormat::BGRA,
+            pw::spa::param::video::VideoFormat::RGBx,
+            pw::spa::param::video::VideoFormat::RGBA,
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoSize,
+            Choice,
+            Range,
+            Rectangle,
+            pw::spa::utils::Rectangle { width: 320, height: 240 },
+            pw::spa::utils::Rectangle { width: 1, height: 1 },
+            pw::spa::utils::Rectangle { width: 4096, height: 4096 }
+        ),
+        pw::spa::pod::property!(
+            pw::spa::param::format::FormatProperties::VideoFramerate,
+            Choice,
+            Range,
+            Fraction,
+            pw::spa::utils::Fraction { num: 30, denom: 1 },
+            pw::spa::utils::Fraction { num: 0, denom: 1 },
+            pw::spa::utils::Fraction { num: 60, denom: 1 }
+        ),
+    );
+
+    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &pw::spa::pod::Value::Object(obj),
+    )?
+    .0
+    .into_inner();
+
+    let mut params = [spa::pod::Pod::from_bytes(&values).unwrap()];
 
     stream.connect(
         spa::utils::Direction::Input,
         Some(node_id),
         pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
-        &mut format_params.iter().collect::<Vec<_>>(),
+        &mut params,
     )?;
 
     mainloop.run();
 
     Ok(())
-}
-
-/// Build SPA video format parameters requesting BGRx format.
-fn build_video_params() -> Vec<Vec<u8>> {
-    use pipewire::spa;
-
-    // Request BGRx (BGRA without alpha) which is common for screen capture
-    let mut params = Vec::new();
-
-    let mut builder = spa::pod::builder::Builder::new_bytes();
-    let format = spa::param::video::VideoInfoRaw::new();
-
-    // We'll use a minimal approach - just request any video format
-    // PipeWire will negotiate the best format available
-    if let Ok(pod_bytes) = spa::pod::serialize::PodSerializer::serialize(
-        std::io::Cursor::new(Vec::new()),
-        &spa::pod::Value::Object(spa::pod::Object {
-            type_: spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
-            id: spa::param::ParamType::EnumFormat.as_raw(),
-            properties: vec![
-                spa::pod::Property {
-                    key: spa::format::FormatProperties::MediaType.as_raw(),
-                    flags: spa::pod::PropertyFlags::empty(),
-                    value: spa::pod::Value::Id(spa::utils::Id(
-                        spa::param::video::MediaType::Video.as_raw(),
-                    )),
-                },
-                spa::pod::Property {
-                    key: spa::format::FormatProperties::MediaSubtype.as_raw(),
-                    flags: spa::pod::PropertyFlags::empty(),
-                    value: spa::pod::Value::Id(spa::utils::Id(
-                        spa::param::video::MediaSubtype::Raw.as_raw(),
-                    )),
-                },
-                spa::pod::Property {
-                    key: spa::format::FormatProperties::VideoFormat.as_raw(),
-                    flags: spa::pod::PropertyFlags::empty(),
-                    value: spa::pod::Value::Id(spa::utils::Id(
-                        spa::param::video::VideoFormat::BGRx.as_raw(),
-                    )),
-                },
-            ],
-        }),
-    ) {
-        params.push(pod_bytes.0.into_inner());
-    }
-
-    params
 }

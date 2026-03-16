@@ -11,6 +11,6 @@ libc = "0.2"
 ksni = "0.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Wayland support via xdg-desktop-portal + PipeWire
-ashpd = { version = "0.13", features = ["pipewire"] }
-pipewire = "0.8"
+ashpd = { version = "0.13", features = ["pipewire", "screencast"] }
+pipewire = "0.9"
 tokio = { version = "1", features = ["rt", "macros"] }
