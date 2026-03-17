@@ -3,7 +3,7 @@
 </p>
 
 
-# Picture in Picture program for x11
+# Picture in Picture program for x11 and Wayland
 - also called a pip
 - logo made by me in gimp
 - demo but on youtube [video](https://youtu.be/yPrhzxseCk8)
